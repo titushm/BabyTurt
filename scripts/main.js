@@ -96,4 +96,5 @@ world.beforeEvents.itemUse.subscribe((event) => {
 	removeTagged(closest.entity);
 	displayInteraction(closest.entity, PARTICLE_OFF, SOUND_OFF);
 
+
 });
