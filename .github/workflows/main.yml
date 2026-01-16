@@ -3,7 +3,7 @@ name: Release MCPACK
 on:
   push:
     tags:
-      - 'v*'
+      - '*'
 
 jobs:
   release:
