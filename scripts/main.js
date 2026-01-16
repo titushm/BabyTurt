@@ -1,4 +1,4 @@
-import { world, system } from "@minecraft/server";
+import { world, system, GameMode } from "@minecraft/server";
 
 const TAGGED_KEY = "BabyTurt:tagged";
 const BEFORE_GROW_INTERVAL = 23900;
@@ -7,7 +7,30 @@ const PARTICLE_ON = "minecraft:heart_particle";
 const SOUND_OFF = "block.copper_bulb.turn_off";
 const SOUND_ON = "block.copper_bulb.turn_on";
 const SOUND_OPTIONS = { pitch: 0.4 };
-const EXCLUDED_TYPES = ["minecraft:item", "minecraft:xp_orb"];
+const EXCLUDED_TYPES = [
+	// Just for performance
+	"minecraft:item",
+	"minecraft:xp_orb",
+	"minecraft:player",
+	"minecraft:armor_stand",
+	"minecraft:arrow",
+	"minecraft:boat",
+	"minecraft:chest_minecart",
+	"minecraft:command_block_minecart",
+	"minecraft:egg",
+	"minecraft:ender_pearl",
+	"minecraft:eye_of_ender_signal",
+	"minecraft:fireball",
+	"minecraft:fireworks_rocket",
+	"minecraft:fishing_hook",
+	"minecraft:hopper_minecart",
+	"minecraft:leash_knot",
+	"minecraft:minecart",
+	"minecraft:painting",
+	"minecraft:snowball",
+	"minecraft:tnt",
+	"minecraft:tnt_minecart",
+];
 let INITIALISED = false;
 let NOTIFIED = false;
 
@@ -68,15 +91,35 @@ world.afterEvents.playerSpawn.subscribe((event) => {
 
 // Save entity states
 world.beforeEvents.playerInteractWithEntity.subscribe(({ itemStack, target }) => {
-	if (!itemStack || itemStack.typeId !== "minecraft:name_tag" || !itemStack.nameTag) return;
-
+	if (itemStack?.typeId !== "minecraft:name_tag" || EXCLUDED_TYPES.includes(target.typeId)) return; // If not name tag or excluded type, return
 	const ageable = target.getComponent("minecraft:ageable");
 	if (!ageable) return;
+	const isItemNamed = (itemStack && itemStack.nameTag) || false;
 
-	if (!target.getDynamicProperty(TAGGED_KEY)) {
+	if (!target.getDynamicProperty(TAGGED_KEY) && isItemNamed) {
 		addTagged(target);
-		elevatedTrigger(target, "minecraft:entity_born");
 		displayInteraction(target, PARTICLE_ON, SOUND_ON);
+	} else if (target.getDynamicProperty(TAGGED_KEY) && !isItemNamed) {
+		removeTagged(target);
+		displayInteraction(target, PARTICLE_OFF, SOUND_OFF);
+	}
+});
+
+// Handle entity interactions
+world.afterEvents.playerInteractWithEntity.subscribe((event) => {
+	if (EXCLUDED_TYPES.includes(event.target.typeId) || !event.beforeItemStack || !event.itemStack) return;
+	const ageable = event.target.getComponent("minecraft:ageable");
+	if (!ageable) return;
+	if (event.beforeItemStack.amount - event.itemStack.amount === 0 && event.player.getGameMode() !== GameMode.Creative) return;
+	if (event.target.getDynamicProperty(TAGGED_KEY)) {
+		elevatedTrigger(event.target, "minecraft:entity_born"); // If an item was used on the tagged mob then reset growth to negate feeding
+	}
+});
+
+world.afterEvents.entitySpawn.subscribe(({ entity }) => {
+	if (EXCLUDED_TYPES.includes(entity.typeId)) return;
+	if (entity.getDynamicProperty(TAGGED_KEY)) {
+		CACHE.tagged.add(entity);
 	}
 });
 
@@ -92,32 +135,4 @@ world.afterEvents.entityLoad.subscribe(({ entity }) => {
 world.beforeEvents.entityRemove.subscribe(({ removedEntity }) => {
 	if (EXCLUDED_TYPES.includes(removedEntity.typeId)) return;
 	CACHE.tagged.delete(removedEntity);
-});
-
-// Remove tag on name tag use
-world.beforeEvents.itemUse.subscribe((event) => {
-	if (!event.itemStack || event.itemStack.typeId !== "minecraft:name_tag" || event.itemStack.nameTag !== undefined) return;
-	const entities = event.source.getEntitiesFromViewDirection({
-		maxDistance: 5,
-		includeLiquidBlocks: false,
-		includePassableBlocks: false,
-		excludeTypes: EXCLUDED_TYPES,
-	});
-	let closest = null;
-	for (const entity of entities) {
-		if (EXCLUDED_TYPES.includes(entity.entity.typeId) || !entity.entity.getDynamicProperty(TAGGED_KEY)) continue;
-		if (!closest || entity.distance < closest.distance) closest = entity;
-	}
-	if (!closest) return;
-	removeTagged(closest.entity);
-	displayInteraction(closest.entity, PARTICLE_OFF, SOUND_OFF);
-});
-
-// Reset growth on entity interaction (fixes feeding)
-world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
-	const ageable = event.target.getComponent("minecraft:ageable");
-	if (!ageable) return;
-
-	if (!event.target.getDynamicProperty(TAGGED_KEY)) return; // Ignore as not tagged
-	elevatedTrigger(event.target, "minecraft:entity_born");
 });
